@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Edge Impulse Tilt Ball Game</title>
+  <style>
+    canvas {
+      background-color: #f0f0f0;
+      display: block;
+      margin: 20px auto;
+      border: 2px solid #333;
+    }
+    #log, #prediction {
+      width: 90%;
+      margin: 10px auto;
+      padding: 10px;
+      font-family: monospace;
+      white-space: pre-wrap;
+    }
+    #log {
+      border: 1px solid #999;
+      background: #f8f8f8;
+      height: 120px;
+      overflow-y: auto;
+    }
+    #prediction {
+      font-size: 1.2em;
+      text-align: center;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="400"></canvas>
+<div id="prediction">Prediction: --</div>
+<div id="log">Loading...</div>
+
+<script src="edge-impulse-standalone.js"></script>
+<script src="run-impulse.js"></script>
+
+<script>
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  const logBox = document.getElementById('log');
+  const predictionBox = document.getElementById('prediction');
+
+  let x = canvas.width / 2;
+  let y = canvas.height / 2;
+  const radius = 20;
+  const speed = 5;
+  let command = 'title_idle';
+  let imuData = [];
+  let classifier;
+  let windowSize = 600;
+
+  function log(msg) {
+    console.log(msg);
+    logBox.innerText += msg + '\n';
+    logBox.scrollTop = logBox.scrollHeight;
+  }
+
+  function drawBall() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, 2 * Math.PI);
+    ctx.fillStyle = 'blue';
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  function moveBall() {
+    if (command === 'title_left') x -= speed;
+    else if (command === 'title_right') x += speed;
+    else if (command === 'title_forward') y -= speed;
+    else if (command === 'title_backward') y += speed;
+
+    // wall limits
+    x = Math.max(radius, Math.min(canvas.width - radius, x));
+    y = Math.max(radius, Math.min(canvas.height - radius, y));
+
+    drawBall();
+  }
+
+  setInterval(moveBall, 33);
+
+  async function init() {
+    try {
+      log("🔄 Loading classifier...");
+      classifier = await window.EdgeImpulseClassifierFactory();
+      const props = classifier.getProperties();
+      windowSize = props.dsp_input_frame_size || 600;
+      log("✅ Classifier ready. Window size: " + windowSize);
+      startMotion();
+      setInterval(classifyMotion, 700);
+    } catch (err) {
+      log("❌ Classifier error: " + err.message);
+    }
+  }
+
+  function startMotion() {
+    log("⚙ Starting motion listener...");
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      DeviceMotionEvent.requestPermission().then(response => {
+        if (response === 'granted') {
+          window.addEventListener('devicemotion', handleMotion);
+          log("✅ Motion listener started (iOS)");
+        } else {
+          log("❌ Motion permission not granted");
+        }
+      }).catch(err => log("❌ Permission error: " + err.message));
+    } else if (typeof window.DeviceMotionEvent !== 'undefined') {
+      window.addEventListener('devicemotion', handleMotion);
+      log("✅ Motion listener started (Android)");
+    } else {
+      log("❌ Motion events not supported");
+    }
+  }
+
+  function handleMotion(e) {
+    const acc = e.accelerationIncludingGravity || e.acceleration || {};
+    imuData.push(acc.x || 0, acc.y || 0, acc.z || 0);
+    if (imuData.length > windowSize) imuData = imuData.slice(-windowSize);
+  }
+
+  async function classifyMotion() {
+    if (imuData.length < windowSize) return;
+
+    const input = new Float32Array(imuData);
+    try {
+      const result = await classifier.classify(input);
+      imuData = [];
+
+      if (result.results && result.results.length > 0) {
+        // Select result with max confidence
+        let top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
+        const confidence = (top.value * 100).toFixed(1);
+        predictionBox.innerText = `Prediction: ${top.label} (${confidence}%)`;
+        log(`🎯 Predictions:\n` + result.results.map(r => `→ ${r.label}: ${(r.value * 100).toFixed(1)}%`).join('\n'));
+
+        command = top.value > 0.7 ? top.label : 'title_idle';  // thresholded
+      }
+    } catch (err) {
+      log("❌ Classification error: " + err.message);
+    }
+  }
+
+  init();
+</script>
+
+</body>
+</html>
