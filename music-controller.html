@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Tilt Music Controller 🎶</title>
   <style>
     body { text-align: center; font-family: sans-serif; background: #f5f5f5; }
@@ -15,8 +15,10 @@
       font-family: monospace;
       white-space: pre-wrap;
       text-align: left;
+      height: 140px;
+      overflow-y: auto;
     }
-    audio { width: 80%; margin: 20px; }
+    audio { width: 80%; margin: 20px auto; display: block; }
   </style>
 </head>
 <body>
@@ -25,10 +27,11 @@
 <p>Use phone tilts to control music: forward = play, back = pause, left/right = change track.</p>
 <audio id="audio" controls src="songs/song1.mp3"></audio>
 <div id="prediction">Prediction: --</div>
-<div id="log">📦 Initializing...</div>
+<div id="log">Loading...</div>
 
 <script src="edge-impulse-standalone.js"></script>
 <script src="run-impulse.js"></script>
+
 <script>
   const predictionBox = document.getElementById('prediction');
   const logBox = document.getElementById('log');
@@ -39,7 +42,7 @@
   let imuData = [];
   let classifier;
   let windowSize = 600;
-  const THRESHOLD = 0.6;
+  const THRESHOLD = 0.7;  // confidence threshold
   let lastCommand = 'title_idle';
 
   function log(msg) {
@@ -49,7 +52,7 @@
   }
 
   function handleCommand(cmd) {
-    if (cmd === lastCommand) return;
+    if (cmd === lastCommand) return;  // ignore repeat commands
     lastCommand = cmd;
 
     if (cmd === 'title_forward') {
@@ -68,29 +71,29 @@
       audio.src = playlist[currentIndex];
       audio.play();
       log('⏭️ Next track');
-    } else {
+    } else if (cmd === 'title_idle') {
       log('🟡 Idle');
+    } else {
+      log(`❓ Unknown command: ${cmd}`);
     }
   }
 
   function startMotion() {
-    log("📡 Requesting motion permission...");
+    log("⚙ Starting motion listener...");
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       DeviceMotionEvent.requestPermission().then(response => {
         if (response === 'granted') {
           window.addEventListener('devicemotion', handleMotion);
           log("✅ Motion listener started (iOS)");
         } else {
-          log("❌ Motion permission denied.");
+          log("❌ Motion permission not granted");
         }
-      }).catch(err => {
-        log("❌ Error requesting permission: " + err.message);
-      });
+      }).catch(err => log("❌ Permission error: " + err.message));
     } else if (typeof window.DeviceMotionEvent !== 'undefined') {
       window.addEventListener('devicemotion', handleMotion);
       log("✅ Motion listener started (Android)");
     } else {
-      log("❌ DeviceMotion not supported on this device.");
+      log("❌ Motion events not supported");
     }
   }
 
@@ -102,22 +105,25 @@
 
   async function classifyMotion() {
     if (imuData.length < windowSize) return;
+
     const input = new Float32Array(imuData);
     try {
       const result = await classifier.classify(input);
       imuData = [];
 
-      if (result.results.length > 0) {
-        const top = result.results[0];
-        predictionBox.innerText = `Prediction: ${top.label} (${(top.value * 100).toFixed(1)}%)`;
+      if (result.results && result.results.length > 0) {
+        // Find top prediction by confidence
+        let top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
+        const confidence = (top.value * 100).toFixed(1);
+        predictionBox.innerText = `Prediction: ${top.label} (${confidence}%)`;
+
+        log(`🎯 Predictions:\n` + result.results.map(r => `→ ${r.label}: ${(r.value * 100).toFixed(1)}%`).join('\n'));
 
         if (top.value >= THRESHOLD) {
           handleCommand(top.label);
         } else {
           handleCommand('title_idle');
         }
-
-        log(`🎯 Prediction: ${top.label} (${(top.value * 100).toFixed(1)}%)`);
       }
     } catch (err) {
       log("❌ Classification error: " + err.message);
@@ -126,18 +132,13 @@
 
   async function init() {
     try {
-      log("🔄 Loading model...");
-      if (typeof window.EdgeImpulseClassifierFactory !== 'function') {
-        log("❌ EdgeImpulseClassifierFactory is not available.");
-        return;
-      }
+      log("🔄 Loading classifier...");
       classifier = await window.EdgeImpulseClassifierFactory();
       const props = classifier.getProperties();
       windowSize = props.dsp_input_frame_size || 600;
       log("✅ Classifier ready. Window size: " + windowSize);
-
       startMotion();
-      setInterval(classifyMotion, 1000);
+      setInterval(classifyMotion, 700);
     } catch (err) {
       log("❌ Error initializing classifier: " + err.message);
     }
