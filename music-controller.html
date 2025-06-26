@@ -19,12 +19,24 @@
       overflow-y: auto;
     }
     audio { width: 80%; margin: 20px auto; display: block; }
+    #startBtn {
+      font-size: 1em;
+      padding: 10px 20px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      margin: 20px auto;
+      display: block;
+      cursor: pointer;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
 
 <h1>Tilt Music Controller 🎶</h1>
 <p>Use phone tilts to control music: forward = play, back = pause, left/right = change track.</p>
+<button id="startBtn">🔓 Tap to Enable Audio</button>
 <audio id="audio" controls src="songs/song1.mp3"></audio>
 <div id="prediction">Prediction: --</div>
 <div id="log">Loading...</div>
@@ -36,13 +48,15 @@
   const predictionBox = document.getElementById('prediction');
   const logBox = document.getElementById('log');
   const audio = document.getElementById('audio');
+  const startBtn = document.getElementById('startBtn');
+
   const playlist = ['songs/song1.mp3', 'songs/song2.mp3', 'songs/song3.mp3'];
   let currentIndex = 0;
 
   let imuData = [];
   let classifier;
   let windowSize = 600;
-  const THRESHOLD = 0.7;  // confidence threshold
+  const THRESHOLD = 0.7;
   let lastCommand = 'title_idle';
 
   function log(msg) {
@@ -52,7 +66,7 @@
   }
 
   function handleCommand(cmd) {
-    if (cmd === lastCommand) return;  // ignore repeat commands
+    if (cmd === lastCommand) return;
     lastCommand = cmd;
 
     if (cmd === 'title_forward') {
@@ -112,7 +126,6 @@
       imuData = [];
 
       if (result.results && result.results.length > 0) {
-        // Find top prediction by confidence
         let top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
         const confidence = (top.value * 100).toFixed(1);
         predictionBox.innerText = `Prediction: ${top.label} (${confidence}%)`;
@@ -144,7 +157,16 @@
     }
   }
 
-  init();
+  startBtn.addEventListener('click', () => {
+    audio.play().then(() => {
+      audio.pause(); // unlock autoplay
+      startBtn.style.display = 'none';
+      log("🔓 Audio unlocked. Tilt detection starting...");
+      init();
+    }).catch(err => {
+      log("❌ Audio unlock failed: " + err.message);
+    });
+  });
 </script>
 
 </body>
